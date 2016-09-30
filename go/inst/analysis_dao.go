@@ -262,6 +262,10 @@ func GetReplicationAnalysis(clusterName string, includeDowntimed bool, auditAnal
 			a.Analysis = DeadMasterAndSomeSlaves
 			a.Description = "Master cannot be reached by orchestrator; some of its slaves are unreachable and none of its reachable slaves is replicating"
 			//
+		} else if a.IsMaster && !a.LastCheckValid && a.CountValidSlaves < a.CountSlaves && a.CountStaleSlaves > 0 && a.CountValidReplicatingSlaves > 0 {
+			a.Analysis = UnreachableMasterWithFailedSlaves
+			a.Description = "Master and some slaves cannot be reached by orchestrator but there are some running yet stale slaves; probably a network issue"
+			//
 		} else if a.IsMaster && !a.LastCheckValid && a.CountStaleSlaves == a.CountSlaves && a.CountValidReplicatingSlaves > 0 {
 			a.Analysis = UnreachableMasterWithStaleSlaves
 			a.Description = "Master cannot be reached by orchestrator and has running yet stale slaves"

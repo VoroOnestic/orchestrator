@@ -128,6 +128,9 @@ var recoverDeadCoMasterFailureCounter = metrics.NewCounter()
 var recoverUnreachableMasterWithStaleSlavesCounter = metrics.NewCounter()
 var recoverUnreachableMasterWithStaleSlavesSuccessCounter = metrics.NewCounter()
 var recoverUnreachableMasterWithStaleSlavesFailureCounter = metrics.NewCounter()
+var recoverUnreachableMasterWithFailedSlavesCounter = metrics.NewCounter()
+var recoverUnreachableMasterWithFailedSlavesSuccessCounter = metrics.NewCounter()
+var recoverUnreachableMasterWithFailedSlavesFailureCounter = metrics.NewCounter()
 
 func init() {
 	metrics.Register("recover.dead_master.start", recoverDeadMasterCounter)
@@ -142,6 +145,9 @@ func init() {
 	metrics.Register("recover.unreach_master_stale_slaves.start", recoverUnreachableMasterWithStaleSlavesCounter)
 	metrics.Register("recover.unreach_master_stale_slaves.success", recoverUnreachableMasterWithStaleSlavesSuccessCounter)
 	metrics.Register("recover.unreach_master_stale_slaves.fail", recoverUnreachableMasterWithStaleSlavesFailureCounter)
+	metrics.Register("recover.unreach_master_failed_slaves.start", recoverUnreachableMasterWithFailedSlavesCounter)
+	metrics.Register("recover.unreach_master_failed_slaves.success", recoverUnreachableMasterWithFailedSlavesSuccessCounter)
+	metrics.Register("recover.unreach_master_failed_slaves.fail", recoverUnreachableMasterWithFailedSlavesFailureCounter)
 }
 
 // replaceCommandPlaceholders replaces agreed-upon placeholders with analysis data
@@ -929,6 +935,26 @@ func checkAndRecoverUnreachableMasterWithStaleSlaves(analysisEntry inst.Replicat
 	return false, nil, err
 }
 
+// checkAndRecoverUnreachableMasterWithFailedSlaves executes an external process. No other action is taken.
+// Returns false.
+func checkAndRecoverUnreachableMasterWithFailedSlaves(analysisEntry inst.ReplicationAnalysis, candidateInstanceKey *inst.InstanceKey, forceInstanceRecovery bool, skipProcesses bool) (bool, *TopologyRecovery, error) {
+	topologyRecovery, err := AttemptRecoveryRegistration(&analysisEntry, !forceInstanceRecovery, !forceInstanceRecovery)
+	if topologyRecovery == nil {
+		log.Debugf("topology_recovery: found an active or recent recovery on %+v. Will not issue another UnreachableMasterWithFailedSlaves.", analysisEntry.AnalyzedInstanceKey)
+	} else {
+		recoverUnreachableMasterWithFailedSlavesCounter.Inc(1)
+		if !skipProcesses {
+			err := executeProcesses(config.Config.UnreachableMasterWithFailedSlavesProcesses, "UnreachableMasterWithFailedSlavesProcesses", topologyRecovery, false)
+			if err != nil {
+				recoverUnreachableMasterWithFailedSlavesFailureCounter.Inc(1)
+			} else {
+				recoverUnreachableMasterWithFailedSlavesSuccessCounter.Inc(1)
+			}
+		}
+	}
+	return false, nil, err
+}
+
 // checkAndRecoverGenericProblem is a general-purpose recovery function
 func checkAndRecoverGenericProblem(analysisEntry inst.ReplicationAnalysis, candidateInstanceKey *inst.InstanceKey, forceInstanceRecovery bool, skipProcesses bool) (bool, *TopologyRecovery, error) {
 	return false, nil, nil
@@ -1006,6 +1032,8 @@ func executeCheckAndRecoverFunction(analysisEntry inst.ReplicationAnalysis, cand
 		go emergentlyReadTopologyInstance(&analysisEntry.AnalyzedInstanceMasterKey, analysisEntry.Analysis)
 	case inst.UnreachableMasterWithStaleSlaves:
 		checkAndRecoverFunction = checkAndRecoverUnreachableMasterWithStaleSlaves
+	case inst.UnreachableMasterWithFailedSlaves:
+		checkAndRecoverFunction = checkAndRecoverUnreachableMasterWithFailedSlaves
 	}
 	// Right now this is mostly causing noise with no clear action.
 	// Will revisit this in the future.
